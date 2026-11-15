@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DJ Fahim</title>
+    <!-- Laddar Mozilla PDF.js för perfekt visning i alla enheter -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        #pdf-viewer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 900px;
+        }
+        canvas {
+            width: 100% !important;
+            height: auto !important;
+            display: block;
+            margin: 0;
+            padding: 0;
+        }
+        #loading {
+            color: #444;
+            font-size: 16px;
+            margin-top: 50px;
+        }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+
+    <div id="loading">Laddar dokument...</div>
+    <div id="pdf-viewer"></div>
+
+    <script>
+        // Peka på din PDF-fil
+        const pdfUrl = 'index.pdf';
+
+        const pdfjsLib = window['pdfjs-dist/build/pdf'];
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const viewer = document.getElementById('pdf-viewer');
+        const loading = document.getElementById('loading');
+
+        // Blockera vanliga kommandon för att spara/skriva ut (Ctrl+S / Ctrl+P)
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'p')) {
+                e.preventDefault();
+            }
+        });
+
+        // Rendera alla sidor som skarpa bilder (canvas)
+        pdfjsLib.getDocument(pdfUrl).promise.then(pdf => {
+            loading.style.display = 'none';
+            
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                pdf.getPage(pageNum).then(page => {
+                    const scale = 2.0; // Hög kvalitet för skarp text
+                    const viewport = page.getViewport({ scale: scale });
+                    const canvas = document.createElement('canvas');
+                    const context = canvas.getContext('2d');
+                    
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+                    viewer.appendChild(canvas);
+
+                    page.render({ canvasContext: context, viewport: viewport });
+                });
+            }
+        }).catch(err => {
+            loading.textContent = 'Kunde inte ladda dokumentet: ' + err.message;
+        });
+    </script>
+</body>
+</html>
