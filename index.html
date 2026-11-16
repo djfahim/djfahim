@@ -2,7 +2,11 @@
 <html lang="sv">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#f9f8f6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>DJ Fahim</title>
     <style>
         * { box-sizing: border-box; }
@@ -10,16 +14,17 @@
             margin: 0;
             padding: 0;
             width: 100%;
-            height: 100%;
-            background-color: #000000;
+            background-color: #f9f8f6;
         }
         #viewer {
+            position: relative;
             width: 100%;
-            height: 100%;
-            overflow-y: auto;
-            overflow-x: hidden;
-            -webkit-overflow-scrolling: touch;
         }
+        #edgeTop, #edgeBottom {
+            width: 100%;
+        }
+        #edgeTop { height: env(safe-area-inset-top, 0px); }
+        #edgeBottom { height: env(safe-area-inset-bottom, 0px); }
         .page {
             position: relative;
             margin: 0 auto;
@@ -47,7 +52,9 @@
 </head>
 <body oncontextmenu="return false;">
 
-    <div id="viewer"><div id="status">Laddar...</div></div>
+    <div id="edgeTop"></div>
+    <div id="viewer"><div id="status" style="color:#555">Laddar...</div></div>
+    <div id="edgeBottom"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
@@ -68,7 +75,7 @@
                 if (!dest) return;
                 const idx = await pdfDoc.getPageIndex(dest[0]);
                 const el = pageEls[idx];
-                if (el) viewer.scrollTo({ top: el.offsetTop, behavior: 'smooth' });
+                if (el) window.scrollTo({ top: el.offsetTop + viewer.offsetTop, behavior: 'smooth' });
             } catch (e) { console.error(e); }
         }
 
@@ -112,59 +119,3 @@
                 const url = ann.url || ann.unsafeUrl;
                 if (url) {
                     a.href = url;
-                    a.target = '_blank';
-                    a.rel = 'noopener noreferrer';
-                } else if (ann.dest) {
-                    a.href = '#';
-                    a.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        goToDest(ann.dest);
-                    });
-                } else {
-                    continue;
-                }
-                wrap.appendChild(a);
-            }
-            return wrap;
-        }
-
-        async function renderAll() {
-            if (!pdfDoc) return;
-            const token = ++renderToken;
-            const scrollRatio = viewer.scrollHeight > 0 ? viewer.scrollTop / viewer.scrollHeight : 0;
-            const frag = document.createDocumentFragment();
-            const newEls = [];
-
-            for (let i = 1; i <= pdfDoc.numPages; i++) {
-                const el = await renderPage(i, token);
-                if (token !== renderToken) return; // ny rendering har startat
-                newEls.push(el);
-                frag.appendChild(el);
-            }
-
-            viewer.innerHTML = '';
-            viewer.appendChild(frag);
-            pageEls = newEls;
-            viewer.scrollTop = scrollRatio * viewer.scrollHeight;
-        }
-
-        pdfjsLib.getDocument(PDF_URL).promise.then((doc) => {
-            pdfDoc = doc;
-            return renderAll();
-        }).catch((err) => {
-            console.error(err);
-            document.getElementById('status').textContent =
-                'Kunde inte ladda PDF-filen (index.pdf).';
-        });
-
-        let lastWidth = window.innerWidth;
-        let resizeTimer;
-        window.addEventListener('resize', () => {
-            if (window.innerWidth === lastWidth) return; // ignorera t.ex. adressfält på mobil
-            lastWidth = window.innerWidth;
-            clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(renderAll, 250);
-        });
-    </script>
-</body>
-</html>
