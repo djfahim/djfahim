@@ -2,7 +2,7 @@
 <html lang="sv">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DJ Fahim</title>
     <style>
         html, body {
@@ -10,16 +10,16 @@
             padding: 0;
             width: 100%;
             height: 100%;
-            background-color: #ffffff; /* Ändra till #000000 om du vill ha svart bakgrund vid marginalerna */
-            overflow-x: hidden;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #000000; /* Svart bakgrund fyller ut eventuella mikromarginaler snyggt */
+            overflow: hidden; /* Tar bort all extra scroll */
         }
         
-        /* Container som fyller skärmen utan extra marginaler */
         .pdf-container {
+            position: fixed;
+            top: 0;
+            left: 0;
             width: 100%;
-            height: 100vh;
-            height: 100dvh; /* Anpassar sig snyggt efter mobilers adressfält */
+            height: 100%;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -29,7 +29,6 @@
             width: 100%;
             height: 100%;
             border: none;
-            object-fit: contain;
         }
     </style>
 </head>
