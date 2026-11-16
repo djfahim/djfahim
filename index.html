@@ -44,7 +44,7 @@
 <body oncontextmenu="return false;">
 
     <div id="edgeTop"></div>
-    <div id="viewer"><div id="status">Laddar...</div></div>
+    <div id="viewer"><div id="status">Startar (v3)...</div></div>
     <div id="edgeBottom"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -65,12 +65,13 @@
         window.addEventListener('unhandledrejection', (e) =>
             showError('Fel: ' + (e.reason && e.reason.message ? e.reason.message : e.reason)));
 
-        if (typeof pdfjsLib === 'undefined') {
-            showError('Kunde inte ladda PDF.js (internet/CDN).');
-        } else {
-            pdfjsLib.GlobalWorkerOptions.workerSrc =
-                'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-            start();
+        const PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+
+        function withTimeout(promise, ms, msg) {
+            return Promise.race([
+                promise,
+                new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))
+            ]);
         }
 
         let pdfDoc = null;
@@ -125,8 +126,125 @@
                 if (token !== renderToken) return null;
             }
 
-       
+            // Klickbara länkar
             const annotations = await page.getAnnotations();
             for (const ann of annotations) {
                 if (ann.subtype !== 'Link') continue;
-                const [x1, y1, x2, y2
+                const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(ann.rect);
+                const a = document.createElement('a');
+                a.style.left = Math.min(x1, x2) + 'px';
+                a.style.top = Math.min(y1, y2) + 'px';
+                a.style.width = Math.abs(x2 - x1) + 'px';
+                a.style.height = Math.abs(y2 - y1) + 'px';
+
+                const url = ann.url || ann.unsafeUrl;
+                if (url) {
+                    a.href = url;
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                } else if (ann.dest) {
+                    a.href = '#';
+                    a.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        goToDest(ann.dest);
+                    });
+                } else {
+                    continue;
+                }
+                wrap.appendChild(a);
+            }
+            return wrap;
+        }
+
+        function matchEdgeColors() {
+            try {
+                const firstCanvas = pageEls[0].querySelector('canvas');
+                const lastCanvases = pageEls[pageEls.length - 1].querySelectorAll('canvas');
+                const lastCanvas = lastCanvases[lastCanvases.length - 1];
+                const px = (c, y) => {
+                    const d = c.getContext('2d').getImageData(Math.floor(c.width / 2), y, 1, 1).data;
+                    return 'rgb(' + d[0] + ',' + d[1] + ',' + d[2] + ')';
+                };
+                const top = px(firstCanvas, 2);
+                const bottom = px(lastCanvas, lastCanvas.height - 3);
+                document.documentElement.style.backgroundColor = top;
+                document.body.style.backgroundColor = top;
+                document.getElementById('edgeTop').style.backgroundColor = top;
+                document.getElementById('edgeBottom').style.backgroundColor = bottom;
+                document.querySelector('meta[name=theme-color]').setAttribute('content', top);
+            } catch (e) { console.error(e); }
+        }
+
+        async function renderAll() {
+            if (!pdfDoc) return;
+            const token = ++renderToken;
+            const docH = document.documentElement.scrollHeight;
+            const scrollRatio = docH > 0 ? window.scrollY / docH : 0;
+            const container = document.createElement('div');
+            const newEls = [];
+
+            for (let i = 1; i <= pdfDoc.numPages; i++) {
+                const el = await renderPage(i, token);
+                if (!el || token !== renderToken) return; // ny rendering har startat
+                newEls.push(el);
+                container.appendChild(el);
+                if (i === 1) {
+                    // visa första sidan direkt, resten läggs till efterhand
+                    viewer.innerHTML = '';
+                    viewer.appendChild(container);
+                    pageEls = newEls;
+                }
+            }
+
+            pageEls = newEls;
+            window.scrollTo(0, scrollRatio * document.documentElement.scrollHeight);
+            matchEdgeColors();
+        }
+
+        async function start() {
+            try {
+                if (typeof pdfjsLib === 'undefined') {
+                    throw new Error('Kunde inte ladda PDF.js från internet (cdnjs).');
+                }
+
+                // Hämta workern själv och starta den från en blob (undviker cross-origin-problem)
+                showError('Förbereder...');
+                try {
+                    const wr = await withTimeout(fetch(PDFJS_BASE + 'pdf.worker.min.js'), 15000, 'Tidsgräns vid hämtning av worker');
+                    const wt = await wr.text();
+                    pdfjsLib.GlobalWorkerOptions.workerSrc =
+                        URL.createObjectURL(new Blob([wt], { type: 'text/javascript' }));
+                } catch (e) {
+                    console.warn(e);
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.js';
+                }
+
+                showError('Hämtar PDF...');
+                const resp = await withTimeout(fetch(PDF_URL), 30000, 'Tidsgräns vid hämtning av index.pdf');
+                if (!resp.ok) throw new Error('index.pdf hittades inte (HTTP ' + resp.status + ')');
+                const buf = await resp.arrayBuffer();
+
+                showError('Läser PDF (' + (buf.byteLength / 1048576).toFixed(1) + ' MB)...');
+                pdfDoc = await withTimeout(
+                    pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise,
+                    30000, 'Tidsgräns vid läsning av PDF');
+
+                showError('Ritar sida 1...');
+                await renderAll();
+            } catch (err) {
+                showError('Fel: ' + (err && err.message ? err.message : err));
+            }
+
+            let lastWidth = window.innerWidth;
+            let resizeTimer;
+            window.addEventListener('resize', () => {
+                if (window.innerWidth === lastWidth) return; // ignorera t.ex. adressfält på mobil
+                lastWidth = window.innerWidth;
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(renderAll, 250);
+            });
+        }
+        start();
+    </script>
+</body>
+</html>
