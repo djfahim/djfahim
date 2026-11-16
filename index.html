@@ -48,12 +48,11 @@
 
         const viewer = document.getElementById('viewer');
         const statusEl = document.getElementById('status');
-        let pdfDoc = null, io = null, gen = 0, busy = false, firstDone = false;
+        let pdfDoc = null, gen = 0, busy = false, firstDone = false;
         let tiles = [], pageEls = [];
 
         function fallback() {
             gen++;
-            if (io) io.disconnect();
             statusEl.remove();
             viewer.innerHTML = '<iframe id="fb" src="' + PDF_URL + '"></iframe>';
         }
@@ -81,6 +80,16 @@
                     document.getElementById('edgeBottom').style.background = c;
                 }
             } catch (e) {}
+        }
+
+        // Markerar vilka bitar som är nära skärmen
+        function update() {
+            const H = window.innerHeight, m = 1500;
+            for (const t of tiles) {
+                const r = t.div.getBoundingClientRect();
+                t.want = r.bottom > -m && r.top < H + m;
+            }
+            pump(gen);
         }
 
         // Ritar bara de bitar som är nära skärmen, uppifrån och ner
@@ -113,18 +122,12 @@
 
         async function build() {
             const g = ++gen;
-            if (io) io.disconnect();
             const ratio = document.documentElement.scrollHeight > 0
                 ? window.scrollY / document.documentElement.scrollHeight : 0;
             const width = viewer.clientWidth || window.innerWidth;
             const dpr = Math.min(window.devicePixelRatio || 1, 2);
             const newTiles = [], newEls = [];
             const container = document.createElement('div');
-
-            io = new IntersectionObserver((entries) => {
-                for (const e of entries) e.target._t.want = e.isIntersecting;
-                pump(g);
-            }, { rootMargin: '1500px 0px' });
 
             for (let i = 1; i <= pdfDoc.numPages; i++) {
                 const page = await pdfDoc.getPage(i);
@@ -147,7 +150,6 @@
                     div._t = t;
                     newTiles.push(t);
                     wrap.appendChild(div);
-                    io.observe(div);
                 }
 
                 // Klickbara länkar direkt, öppnas i ny flik
@@ -158,4 +160,72 @@
                     const a = document.createElement('a');
                     a.style.left = Math.min(x1, x2) + 'px';
                     a.style.top = Math.min(y1, y2) + 'px';
-                    a.style.width = Math.abs(x2 
+                    a.style.width = Math.abs(x2 - x1) + 'px';
+                    a.style.height = Math.abs(y2 - y1) + 'px';
+                    const url = ann.url || ann.unsafeUrl;
+                    if (url) {
+                        a.href = url;
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                    } else if (ann.dest) {
+                        a.href = '#';
+                        a.addEventListener('click', (e) => { e.preventDefault(); goToDest(ann.dest); });
+                    } else continue;
+                    wrap.appendChild(a);
+                }
+                container.appendChild(wrap);
+                newEls.push(wrap);
+            }
+
+            if (g !== gen) return;
+            tiles = newTiles;
+            pageEls = newEls;
+            viewer.replaceChildren(container);
+            window.scrollTo(0, ratio * document.documentElement.scrollHeight);
+            update();
+        }
+
+        async function start() {
+            try {
+                if (typeof pdfjsLib === 'undefined') throw new Error('pdf.js');
+                // Hämta PDF och worker samtidigt
+                const [workerText, buf] = await Promise.all([
+                    fetch(BASE + 'pdf.worker.min.js').then(r => r.text()).catch(() => null),
+                    fetch(PDF_URL).then(r => {
+                        if (!r.ok) throw new Error('HTTP ' + r.status);
+                        return r.arrayBuffer();
+                    })
+                ]);
+                pdfjsLib.GlobalWorkerOptions.workerSrc = workerText
+                    ? URL.createObjectURL(new Blob([workerText], { type: 'text/javascript' }))
+                    : BASE + 'pdf.worker.min.js';
+                pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+                await build();
+            } catch (e) {
+                console.error(e);
+                fallback();
+            }
+        }
+
+        let lastWidth = window.innerWidth, timer;
+        window.addEventListener('resize', () => {
+            if (window.innerWidth === lastWidth || !pdfDoc) return;
+            lastWidth = window.innerWidth;
+            clearTimeout(timer);
+            timer = setTimeout(build, 250);
+        });
+
+        let ticking = false;
+        window.addEventListener('scroll', () => {
+            if (ticking || !tiles.length) return;
+            ticking = true;
+            requestAnimationFrame(() => { ticking = false; update(); });
+        }, { passive: true });
+
+        // Om inget hunnit visas efter 25 s: visa PDF:en direkt
+        setTimeout(() => { if (!firstDone) fallback(); }, 25000);
+
+        start();
+    </script>
+</body>
+</html>
