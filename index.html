@@ -5,27 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DJ Fahim</title>
     <style>
-        body, html {
+        html, body {
             margin: 0;
             padding: 0;
             width: 100%;
             height: 100%;
-            overflow: hidden;
-            background-color: #ffffff;
+            background-color: #ffffff; /* Ändra till #000000 om du vill ha svart bakgrund vid marginalerna */
+            overflow-x: hidden;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
-        /* Gör så PDF-filen fyller skärmen responsivt */
+        
+        /* Container som fyller skärmen utan extra marginaler */
+        .pdf-container {
+            width: 100%;
+            height: 100vh;
+            height: 100dvh; /* Anpassar sig snyggt efter mobilers adressfält */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
         embed {
             width: 100%;
             height: 100%;
             border: none;
+            object-fit: contain;
         }
     </style>
 </head>
 <body oncontextmenu="return false;">
 
-    <!-- Visar PDF-filen direkt med inbyggd funktionalitet för länkar -->
-    <embed src="index.pdf" type="application/pdf" />
+    <div class="pdf-container">
+        <embed src="index.pdf" type="application/pdf" />
+    </div>
 
 </body>
 </html>
