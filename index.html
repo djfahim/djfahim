@@ -16,34 +16,25 @@
             width: 100%;
             background-color: #f9f8f6;
         }
-        #viewer {
-            position: relative;
-            width: 100%;
-        }
-        #edgeTop, #edgeBottom {
-            width: 100%;
-        }
+        #viewer { position: relative; width: 100%; }
+        #edgeTop, #edgeBottom { width: 100%; }
         #edgeTop { height: env(safe-area-inset-top, 0px); }
         #edgeBottom { height: env(safe-area-inset-bottom, 0px); }
         .page {
             position: relative;
             margin: 0 auto;
-            background: #000;
+            overflow: hidden;
             line-height: 0;
         }
-        .page canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-        }
+        .page canvas { display: block; }
         .page a {
             position: absolute;
             display: block;
             cursor: pointer;
-            -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+            -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
         }
         #status {
-            color: #fff;
+            color: #555;
             font-family: sans-serif;
             text-align: center;
             padding: 40px 20px;
@@ -53,18 +44,35 @@
 <body oncontextmenu="return false;">
 
     <div id="edgeTop"></div>
-    <div id="viewer"><div id="status" style="color:#555">Laddar...</div></div>
+    <div id="viewer"><div id="status">Laddar...</div></div>
     <div id="edgeBottom"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
         const PDF_URL = 'index.pdf';
         const MAX_WIDTH = 1000; // max bredd i px på skärmen
-
-        pdfjsLib.GlobalWorkerOptions.workerSrc =
-            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        const TILE_HEIGHT = 1200; // höjd per bildruta (css-px), undviker iPhones canvas-gräns
 
         const viewer = document.getElementById('viewer');
+        const statusEl = document.getElementById('status');
+
+        function showError(msg) {
+            if (statusEl.isConnected) statusEl.textContent = msg;
+            console.error(msg);
+        }
+
+        window.addEventListener('error', (e) => showError('Fel: ' + e.message));
+        window.addEventListener('unhandledrejection', (e) =>
+            showError('Fel: ' + (e.reason && e.reason.message ? e.reason.message : e.reason)));
+
+        if (typeof pdfjsLib === 'undefined') {
+            showError('Kunde inte ladda PDF.js (internet/CDN).');
+        } else {
+            pdfjsLib.GlobalWorkerOptions.workerSrc =
+                'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            start();
+        }
+
         let pdfDoc = null;
         let pageEls = [];
         let renderToken = 0;
@@ -81,41 +89,44 @@
 
         async function renderPage(num, token) {
             const page = await pdfDoc.getPage(num);
-            if (token !== renderToken) return;
+            if (token !== renderToken) return null;
 
-            const width = Math.min(viewer.clientWidth, MAX_WIDTH);
+            const width = Math.min(viewer.clientWidth || window.innerWidth, MAX_WIDTH);
             const base = page.getViewport({ scale: 1 });
             const scale = width / base.width;
             const viewport = page.getViewport({ scale });
-            const dpr = window.devicePixelRatio || 1;
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
             const wrap = document.createElement('div');
             wrap.className = 'page';
             wrap.style.width = viewport.width + 'px';
             wrap.style.height = viewport.height + 'px';
 
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.floor(viewport.width * dpr);
-            canvas.height = Math.floor(viewport.height * dpr);
-            wrap.appendChild(canvas);
+            // Rendera i flera bitar (tiles) så att långa sidor inte spräcker canvas-gränsen
+            const tiles = Math.ceil(viewport.height / TILE_HEIGHT);
+            for (let t = 0; t < tiles; t++) {
+                const y0 = t * TILE_HEIGHT;
+                const h = Math.min(TILE_HEIGHT, viewport.height - y0);
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.ceil(viewport.width * dpr);
+                canvas.height = Math.ceil(h * dpr);
+                canvas.style.position = 'absolute';
+                canvas.style.left = '0';
+                canvas.style.top = y0 + 'px';
+                canvas.style.width = viewport.width + 'px';
+                canvas.style.height = h + 'px';
+                wrap.appendChild(canvas);
 
-            await page.render({
-                canvasContext: canvas.getContext('2d'),
-                viewport,
-                transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null
-            }).promise;
+                await page.render({
+                    canvasContext: canvas.getContext('2d'),
+                    viewport,
+                    transform: [dpr, 0, 0, dpr, 0, -y0 * dpr]
+                }).promise;
+                if (token !== renderToken) return null;
+            }
 
             // Klickbara länkar
             const annotations = await page.getAnnotations();
             for (const ann of annotations) {
                 if (ann.subtype !== 'Link') continue;
-                const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(ann.rect);
-                const a = document.createElement('a');
-                a.style.left = Math.min(x1, x2) + 'px';
-                a.style.top = Math.min(y1, y2) + 'px';
-                a.style.width = Math.abs(x2 - x1) + 'px';
-                a.style.height = Math.abs(y2 - y1) + 'px';
-
-                const url = ann.url || ann.unsafeUrl;
-                if (url) {
-                    a.href = url;
+                const [x1, y1, x2, y2
