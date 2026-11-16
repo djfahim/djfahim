@@ -30,6 +30,7 @@
         .page a {
             position: absolute;
             display: block;
+            z-index: 2;
             cursor: pointer;
             -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
         }
@@ -39,33 +40,55 @@
             text-align: center;
             padding: 40px 20px;
         }
+        #fallback { width: 100%; height: 100vh; border: 0; display: block; }
+        #badge {
+            position: fixed; left: 8px; bottom: 8px; z-index: 9;
+            font: 11px sans-serif; color: #777; background: rgba(255,255,255,.85);
+            padding: 3px 6px; border-radius: 4px; max-width: 90%;
+        }
     </style>
 </head>
 <body oncontextmenu="return false;">
 
     <div id="edgeTop"></div>
-    <div id="viewer"><div id="status">Startar (v3)...</div></div>
+    <div id="viewer"><div id="status">Laddar...</div></div>
     <div id="edgeBottom"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script>
         const PDF_URL = 'index.pdf';
-        const MAX_WIDTH = 1000; // max bredd i px på skärmen
         const TILE_HEIGHT = 1200; // höjd per bildruta (css-px), undviker iPhones canvas-gräns
+        const PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
 
         const viewer = document.getElementById('viewer');
         const statusEl = document.getElementById('status');
+        let pdfDoc = null;
+        let pageEls = [];
+        let renderToken = 0;
+        let shown = false;     // true när första sidan visas
+        let failed = false;
 
-        function showError(msg) {
+        function setStatus(msg) {
             if (statusEl.isConnected) statusEl.textContent = msg;
-            console.error(msg);
         }
 
-        window.addEventListener('error', (e) => showError('Fel: ' + e.message));
-        window.addEventListener('unhandledrejection', (e) =>
-            showError('Fel: ' + (e.reason && e.reason.message ? e.reason.message : e.reason)));
+        // Reservläge: visar PDF:en med webbläsarens egen visare (utan klickbara länkar på iPhone)
+        function fallback(msg) {
+            if (shown || failed) return;
+            failed = true;
+            renderToken++;
+            console.error(msg);
+            viewer.innerHTML = '<iframe id="fallback" src="' + PDF_URL + '"></iframe>';
+            const b = document.createElement('div');
+            b.id = 'badge';
+            b.textContent = 'Enkelt läge: ' + msg;
+            document.body.appendChild(b);
+        }
 
-        const PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+        window.addEventListener('error', (e) => fallback(e.message));
+        window.addEventListener('unhandledrejection', (e) =>
+            fallback(e.reason && e.reason.message ? e.reason.message : String(e.reason)));
+        setTimeout(() => fallback('tidsgräns, sidan hann inte laddas'), 30000);
 
         function withTimeout(promise, ms, msg) {
             return Promise.race([
@@ -73,10 +96,6 @@
                 new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))
             ]);
         }
-
-        let pdfDoc = null;
-        let pageEls = [];
-        let renderToken = 0;
 
         async function goToDest(dest) {
             try {
@@ -92,10 +111,10 @@
             const page = await pdfDoc.getPage(num);
             if (token !== renderToken) return null;
 
-            const width = Math.min(viewer.clientWidth || window.innerWidth, MAX_WIDTH);
+            // Full bredd, inga marginaler
+            const width = viewer.clientWidth || window.innerWidth;
             const base = page.getViewport({ scale: 1 });
-            const scale = width / base.width;
-            const viewport = page.getViewport({ scale });
+            const viewport = page.getViewport({ scale: width / base.width });
             const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
             const wrap = document.createElement('div');
@@ -103,7 +122,7 @@
             wrap.style.width = viewport.width + 'px';
             wrap.style.height = viewport.height + 'px';
 
-            // Rendera i flera bitar (tiles) så att långa sidor inte spräcker canvas-gränsen
+            // Rendera i flera bitar så att långa sidor inte spräcker iPhones canvas-gräns
             const tiles = Math.ceil(viewport.height / TILE_HEIGHT);
             for (let t = 0; t < tiles; t++) {
                 const y0 = t * TILE_HEIGHT;
@@ -126,7 +145,7 @@
                 if (token !== renderToken) return null;
             }
 
-            // Klickbara länkar
+            // Klickbara länkar (öppnas i ny flik)
             const annotations = await page.getAnnotations();
             for (const ann of annotations) {
                 if (ann.subtype !== 'Link') continue;
@@ -156,6 +175,7 @@
             return wrap;
         }
 
+        // Färgen uppe/nere i PDF:en används bakom statusfältet och i botten
         function matchEdgeColors() {
             try {
                 const firstCanvas = pageEls[0].querySelector('canvas');
@@ -176,7 +196,7 @@
         }
 
         async function renderAll() {
-            if (!pdfDoc) return;
+            if (!pdfDoc || failed) return;
             const token = ++renderToken;
             const docH = document.documentElement.scrollHeight;
             const scrollRatio = docH > 0 ? window.scrollY / docH : 0;
@@ -184,15 +204,16 @@
             const newEls = [];
 
             for (let i = 1; i <= pdfDoc.numPages; i++) {
+                setStatus('Ritar sida ' + i + '...');
                 const el = await renderPage(i, token);
-                if (!el || token !== renderToken) return; // ny rendering har startat
+                if (!el || token !== renderToken) return;
                 newEls.push(el);
                 container.appendChild(el);
                 if (i === 1) {
-                    // visa första sidan direkt, resten läggs till efterhand
                     viewer.innerHTML = '';
                     viewer.appendChild(container);
                     pageEls = newEls;
+                    shown = true;
                 }
             }
 
@@ -204,13 +225,12 @@
         async function start() {
             try {
                 if (typeof pdfjsLib === 'undefined') {
-                    throw new Error('Kunde inte ladda PDF.js från internet (cdnjs).');
+                    throw new Error('kunde inte ladda PDF.js (cdnjs)');
                 }
 
-                // Hämta workern själv och starta den från en blob (undviker cross-origin-problem)
-                showError('Förbereder...');
+                // Starta PDF.js-workern från en blob (undviker cross-origin-problem)
                 try {
-                    const wr = await withTimeout(fetch(PDFJS_BASE + 'pdf.worker.min.js'), 15000, 'Tidsgräns vid hämtning av worker');
+                    const wr = await withTimeout(fetch(PDFJS_BASE + 'pdf.worker.min.js'), 15000, 'worker-tidsgräns');
                     const wt = await wr.text();
                     pdfjsLib.GlobalWorkerOptions.workerSrc =
                         URL.createObjectURL(new Blob([wt], { type: 'text/javascript' }));
@@ -219,32 +239,5 @@
                     pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.js';
                 }
 
-                showError('Hämtar PDF...');
-                const resp = await withTimeout(fetch(PDF_URL), 30000, 'Tidsgräns vid hämtning av index.pdf');
-                if (!resp.ok) throw new Error('index.pdf hittades inte (HTTP ' + resp.status + ')');
-                const buf = await resp.arrayBuffer();
-
-                showError('Läser PDF (' + (buf.byteLength / 1048576).toFixed(1) + ' MB)...');
-                pdfDoc = await withTimeout(
-                    pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise,
-                    30000, 'Tidsgräns vid läsning av PDF');
-
-                showError('Ritar sida 1...');
-                await renderAll();
-            } catch (err) {
-                showError('Fel: ' + (err && err.message ? err.message : err));
-            }
-
-            let lastWidth = window.innerWidth;
-            let resizeTimer;
-            window.addEventListener('resize', () => {
-                if (window.innerWidth === lastWidth) return; // ignorera t.ex. adressfält på mobil
-                lastWidth = window.innerWidth;
-                clearTimeout(resizeTimer);
-                resizeTimer = setTimeout(renderAll, 250);
-            });
-        }
-        start();
-    </script>
-</body>
-</html>
+                setStatus('Hämtar PDF...');
+                const resp = await withTimeout(fetch(
