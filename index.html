@@ -5,38 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>DJ Fahim</title>
     <style>
+        * {
+            box-sizing: border-box;
+        }
         html, body {
             margin: 0;
             padding: 0;
-            width: 100%;
-            height: 100%;
-            background-color: #000000; /* Svart bakgrund fyller ut eventuella mikromarginaler snyggt */
-            overflow: hidden; /* Tar bort all extra scroll */
+            width: 100vw;
+            height: 100vh;
+            background-color: #000000;
+            overflow: hidden;
         }
-        
-        .pdf-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        embed {
+        iframe {
             width: 100%;
             height: 100%;
             border: none;
+            display: block;
         }
     </style>
 </head>
 <body oncontextmenu="return false;">
 
-    <div class="pdf-container">
-        <embed src="index.pdf" type="application/pdf" />
-    </div>
+    <!-- Använder iframe istället för embed för bättre kompatibilitet på mobiler -->
+    <iframe src="index.pdf#toolbar=0&navpanes=0&scrollbar=0" type="application/pdf"></iframe>
 
 </body>
 </html>
