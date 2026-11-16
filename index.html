@@ -2,32 +2,169 @@
 <html lang="sv">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DJ Fahim</title>
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
         html, body {
             margin: 0;
             padding: 0;
-            width: 100vw;
-            height: 100vh;
-            background-color: #000000;
-            overflow: hidden;
-        }
-        iframe {
             width: 100%;
             height: 100%;
-            border: none;
+            background-color: #000000;
+        }
+        #viewer {
+            width: 100%;
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+        }
+        .page {
+            position: relative;
+            margin: 0 auto;
+            background: #000;
+            line-height: 0;
+        }
+        .page canvas {
             display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .page a {
+            position: absolute;
+            display: block;
+            cursor: pointer;
+            -webkit-tap-highlight-color: rgba(255, 255, 255, 0.2);
+        }
+        #status {
+            color: #fff;
+            font-family: sans-serif;
+            text-align: center;
+            padding: 40px 20px;
         }
     </style>
 </head>
 <body oncontextmenu="return false;">
 
-    <!-- Använder iframe istället för embed för bättre kompatibilitet på mobiler -->
-    <iframe src="index.pdf#toolbar=0&navpanes=0&scrollbar=0" type="application/pdf"></iframe>
+    <div id="viewer"><div id="status">Laddar...</div></div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        const PDF_URL = 'index.pdf';
+        const MAX_WIDTH = 1000; // max bredd i px på skärmen
+
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        const viewer = document.getElementById('viewer');
+        let pdfDoc = null;
+        let pageEls = [];
+        let renderToken = 0;
+
+        async function goToDest(dest) {
+            try {
+                if (typeof dest === 'string') dest = await pdfDoc.getDestination(dest);
+                if (!dest) return;
+                const idx = await pdfDoc.getPageIndex(dest[0]);
+                const el = pageEls[idx];
+                if (el) viewer.scrollTo({ top: el.offsetTop, behavior: 'smooth' });
+            } catch (e) { console.error(e); }
+        }
+
+        async function renderPage(num, token) {
+            const page = await pdfDoc.getPage(num);
+            if (token !== renderToken) return;
+
+            const width = Math.min(viewer.clientWidth, MAX_WIDTH);
+            const base = page.getViewport({ scale: 1 });
+            const scale = width / base.width;
+            const viewport = page.getViewport({ scale });
+            const dpr = window.devicePixelRatio || 1;
+
+            const wrap = document.createElement('div');
+            wrap.className = 'page';
+            wrap.style.width = viewport.width + 'px';
+            wrap.style.height = viewport.height + 'px';
+
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.floor(viewport.width * dpr);
+            canvas.height = Math.floor(viewport.height * dpr);
+            wrap.appendChild(canvas);
+
+            await page.render({
+                canvasContext: canvas.getContext('2d'),
+                viewport,
+                transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null
+            }).promise;
+
+            // Klickbara länkar
+            const annotations = await page.getAnnotations();
+            for (const ann of annotations) {
+                if (ann.subtype !== 'Link') continue;
+                const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(ann.rect);
+                const a = document.createElement('a');
+                a.style.left = Math.min(x1, x2) + 'px';
+                a.style.top = Math.min(y1, y2) + 'px';
+                a.style.width = Math.abs(x2 - x1) + 'px';
+                a.style.height = Math.abs(y2 - y1) + 'px';
+
+                const url = ann.url || ann.unsafeUrl;
+                if (url) {
+                    a.href = url;
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                } else if (ann.dest) {
+                    a.href = '#';
+                    a.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        goToDest(ann.dest);
+                    });
+                } else {
+                    continue;
+                }
+                wrap.appendChild(a);
+            }
+            return wrap;
+        }
+
+        async function renderAll() {
+            if (!pdfDoc) return;
+            const token = ++renderToken;
+            const scrollRatio = viewer.scrollHeight > 0 ? viewer.scrollTop / viewer.scrollHeight : 0;
+            const frag = document.createDocumentFragment();
+            const newEls = [];
+
+            for (let i = 1; i <= pdfDoc.numPages; i++) {
+                const el = await renderPage(i, token);
+                if (token !== renderToken) return; // ny rendering har startat
+                newEls.push(el);
+                frag.appendChild(el);
+            }
+
+            viewer.innerHTML = '';
+            viewer.appendChild(frag);
+            pageEls = newEls;
+            viewer.scrollTop = scrollRatio * viewer.scrollHeight;
+        }
+
+        pdfjsLib.getDocument(PDF_URL).promise.then((doc) => {
+            pdfDoc = doc;
+            return renderAll();
+        }).catch((err) => {
+            console.error(err);
+            document.getElementById('status').textContent =
+                'Kunde inte ladda PDF-filen (index.pdf).';
+        });
+
+        let lastWidth = window.innerWidth;
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            if (window.innerWidth === lastWidth) return; // ignorera t.ex. adressfält på mobil
+            lastWidth = window.innerWidth;
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(renderAll, 250);
+        });
+    </script>
 </body>
 </html>
