@@ -125,7 +125,7 @@
                 if (token !== renderToken) return null;
             }
 
-            // Klickbara länkar
+       
             const annotations = await page.getAnnotations();
             for (const ann of annotations) {
                 if (ann.subtype !== 'Link') continue;
